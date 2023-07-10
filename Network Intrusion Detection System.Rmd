@@ -1,0 +1,1123 @@
+---
+title: "Network Intrusion Detection System"
+authors: "Daniel, Chetna, Akshay, Ajay"
+group: "Final project team 4"
+andrew ids: "dschnelb, cbakhshi, aoza, avalecha"
+date: "5/14/2020"
+output: 
+  rmdformats::material:
+    code_fold: show
+ 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+```
+
+# ABSTRACT 
+In this report, we developed a Network Intrusion Detection System using supervised and unsupervised data mining models for classification. The dataset used for `network_traffic.csv`. We performed exploratory data analysis and multiple factor analysis to understand the nature and patterns in intrusions. After exploration, we decided to use 4 models that work well for binary classification. We used `Logistic Regression`, `KNN`,`Decision Trees and Random Forest` and `Gradient Boosting Machine`. After building our models we evaluated the models using confusion matrix and ROC/AUC plots. In the end we present out findings and the model bank should choose for intrusion detection. 
+
+# INTRODUCTION
+We are trying to develop a Network Intrusion Detection System for XYZ Bank. After discovering unusual activity on the Bank's networking system, many other such instances of anomalous network activity were found which have resulted in significant sums of money being siphoned from bank accounts of the customers. Using a synopsis of logged network activities (containing benign network sessions as well as intrusions), we are trying to build and train a model with high accuracy intrusion detection. 
+
+Overview of the metrics included in the synopsis of logged network activities which are being used to train our model are below:
+  
+  1.`duration`: contains the length of the connection in seconds (data type: continuous)
+  
+  2.`protocol_type`: contains details on the type of the protocol, e.g. tcp, udp, etc.(data type: discrete)
+  
+  3.`service`: contains details on the network service on the destination, e.g., http, telnet, etc.(data type: discrete)
+  
+  4.`src_bytes`: contains the number of data bytes from source to destination (data type: continuous)
+  
+  5.`dst_bytes`: contains the number of data bytes from destination to source (data type: continuous)
+  
+  6.`flag`: contains details on the normal or error status of the connection (data type: discrete)
+  
+  7.`land`: contains 1 if connection is from/to the same host/port; 0 otherwise (data type: discrete)
+  
+  8.`wrong_fragment`: contains number of ``wrong'' fragments (data type: continuous)
+  
+  9.`urgent`: contains number of urgent packets(data type: continuous)
+  
+  10.`hot`: contains number of ''hot'' indicators (data type: continuous)
+  
+  11.`num_failed_logins`: contains number of failed login attempts (data type: continuous)
+  
+  12.`logged_in`: contains 1 if successfully logged in; 0 otherwise (data type: discrete)
+  
+  13.`num_compromised`: contains the number of ''compromised'' conditions (data type: continuous)
+  
+  14.`root_shell`: contains 1 if root shell is obtained; 0 otherwise (data type: discrete)
+  
+  15.`su_attempted`: contains 1 if ''su root'' command attempted; 0 otherwise (data type: discrete)
+  
+  16.`num_root`: contains the number of ''root'' accesses (data type: continuous)
+  
+  17.`num_file_creations`: contains the number of file creation operations (data type: continuous)
+  
+  18.`num_shells`: contains the number of shell prompts (data type: continuous)
+  
+  19.`num_access_files`: contains the number of operations on access control files (data type: continuous)
+  
+  20.`num_outbound_cmds`: contains the number of outbound commands in an ftp session (data type: continuous)
+  
+  21.`is_hot_login`: contains 1 if the login belongs to the ``hot'' list; 0 otherwise (data type: discrete)
+  
+  22.`is_guest_login`: contains 1 if the login is a ``guest''login; 0 otherwise (data type: discrete)
+  
+  23.`is_intrusion`: contains 1 if the session resulted in an intrusion; 0 otherwise (data type: discrete)
+
+# Section 1: Exploratory Data Analysis and Data Processing {.tabset}
+
+## Load required packages
+```{r package_load}
+library(ggplot2) # graphics library
+library(tidyverse) # for summaries and tables
+library(expss) 
+library(GoodmanKruskal) # for catergorical variable association
+library(caret) # for model metrics
+library(knitr)   # contains knitting control
+library(tree)    # for the tree-fitting 'tree' function
+library(corrplot) # for correlation matrices
+library(randomForest) # for random forests and bagging
+library(pROC)  # for ROC curves
+library(rpart)
+library(partykit)
+library(class)
+library(FactoMineR)  # for MFA
+library(factoextra)
+library(h2o)          # for GBM model
+h2o.init(nthreads=-1)
+
+options(scipen = 4)  # Suppresses scientific notation
+```
+
+## Get data
+
+```{r, cache = TRUE}
+# Read in the network data
+network.original <- read.csv("network_traffic.csv", header = TRUE, skip = 1, col.names = c('duration','protocol_type','service','flag','src_bytes','dst_bytes','land','wrong_fragment','urgent','hot','num_failed_logins','logged_in','num_compromised','root_shell','su_attempted','num_root','num_file_creations','num_shells','num_access_files','num_outbound_cmds','is_hot_login','is_guest_login','is_intrusion'))
+
+# Change "0=" value at end of file to "0"
+network.original$is_intrusion <- plyr::mapvalues(network.original$is_intrusion, from = c("0="), to = c("0"))
+
+# Making a copy of network.original for exploratory analysis
+network.org.2 <- copy(network.original)
+network.org.2$is_intrusion <- plyr::mapvalues(network.org.2$is_intrusion, c(0,1), c("Benign", "Intrusion"))
+
+# Code discrete variables as factors
+network <- transform(
+  network.original,
+  flag=as.factor(flag),
+  land=as.factor(land),
+  logged_in=as.factor(logged_in),
+  root_shell=as.factor(root_shell),
+  su_attempted=as.factor(su_attempted),
+  is_hot_login=as.factor(is_hot_login),
+  is_guest_login=as.factor(is_guest_login)
+)
+
+# Recode factors to be integers to simplify view
+network.integer <- transform(
+  network,
+  protocol_type=as.numeric(protocol_type),
+  service=as.numeric(service),
+  flag=as.numeric(flag)
+)
+
+# Final network dataframe with integer-coded factors
+network <- transform(
+  network.integer,
+  protocol_type=as.factor(protocol_type),
+  service=as.factor(service),
+  flag=as.factor(flag),
+  is_intrusion = as.factor(is_intrusion)
+)
+```
+
+## Summarize data
+
+```{r}
+# Summarize
+str(network)
+summary(network)
+```
+
+- Summary shows `su_attempted` contains values of "2", which are invalid per data description.
+
+```{r}
+# Removing row where `su_attempted` = 2 from transformed network dataset; violates data description
+network[network$su_attempted=="2",]
+network <- network[-c(344),]
+row.names(network) <- 1:nrow(network)
+
+# Removing row where `su_attempted` = 2 from network.org.2
+network.org.2[network.org.2$su_attempted=="2",]
+network.org.2 <- network.org.2[-c(344),]
+row.names(network.org.2) <- 1:nrow(network.org.2)
+```
+
+- Check within-predictor variance since we have several variables in summary that have all zero values.
+
+```{r}
+# This checks for variance by column (using "2" in apply is for columns)
+col.var <- (apply(network, 2, var))
+which(col.var == 0)
+```
+
+- After summary, drop columns of zero-variance predictors (which add nothing to prediction!)
+
+```{r}
+network <- select(network,-c(7,8,9,11, 15, 20, 21))
+
+network.org.2  <- select(network.org.2 ,-c(7,8,9,11, 15, 20, 21))
+# Check near-zero predictors which may also be dropped later in analysis
+nearZeroVar(network)
+```
+
+## Split clean data for modeling
+
+>The function `createDataPartition` can be used to create balanced splits of the data. If the y argument to this function is a factor, the random sampling occurs within each class and should preserve the overall class distribution of the data. For example, to create a single 80/20% split
+
+```{r}
+# Define training and test sets
+set.seed(45)
+train.index <- createDataPartition(network$is_intrusion, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+network.train <- network[train.index,]
+network.test <- network[-train.index,]
+```
+
+## EDA
+
+```{r}
+### Summaries
+#install.packages(expss)
+
+# Create a dataframe with intrusion rows only for tables and plots
+network.int <- network[network$is_intrusion=="1",]
+network.org.int <- network.org.2[network.org.2$is_intrusion=="Intrusion",]
+
+# Base for network dataframe and 
+# base for "intrusion only" dataframe
+base <- ggplot(network.org.2)
+base.int <- ggplot(network.org.2[network.org.2$is_intrusion=="Intrusion",])
+```
+
+**Tables and plots**
+
+```{r}
+network.org.2 %>%
+  tab_cells(is_intrusion) %>%
+  tab_stat_cases() %>%
+  tab_pivot()
+
+network.org.2 %>%
+  tab_cells(is_intrusion) %>%
+  tab_stat_cpct() %>%
+  tab_pivot() %>%
+  tab_caption("Proportion")
+```
+
+- There are about 300 observation. 10% of all observations in the dataset are intrusions.
+
+**Protocol type and Intrusion**
+```{r}
+table(network.org.2$protocol_type, network.org.2$is_intrusion) %>%
+  kable()
+
+ggplot(data = network.org.2, aes(x = protocol_type)) + geom_bar() + facet_grid(. ~ is_intrusion) +labs(title = " No. of Intrusion and Benign sessions by portocol type")
+```
+
+- We obeserve that the intrusions are only under **tcp** and **udp** protocols. The number of intrusions are more under `protocol` type **tcp** than under **udp**.
+
+**Service Network and Intrusion**
+```{r}
+table(network.org.2$service, network.org.2$is_intrusion) %>%
+  kable()
+
+ggplot(data = network.org.2, aes(x = service)) + geom_bar() + facet_grid(. ~ is_intrusion) + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +labs(title = " No. of Intrusion and Benign sessions by service type")
+```
+
+- We obeserve that the intrusions are only under **ftp**, **ftp_data**, **http**,  and **private** `service` types. The number of intrusions are higher for **private** and **http** `service` types.
+
+**Flag status and Intrusion**
+```{r}
+table(network.org.2$flag, network.org.2$is_intrusion) %>%
+  kable()
+ggplot(data = network.org.2, aes(x = flag)) + geom_bar() + facet_grid(. ~ is_intrusion) +labs(title = " No. of Intrusion and Benign sessions by flag status")
+```
+
+- We obeserve that the intrusions are only under **SF**, **S0**, and **RSTR** flags. The number of intrusions are highest for **SF** and and the ones from **S0** and **RSTS** are only intrusions. 
+
+**Observations by protocol and service**
+```{r}
+network.org.2 %>%
+  tab_cells(service) %>%
+  tab_cols(protocol_type) %>%
+  tab_stat_cases() %>%
+  tab_pivot() %>%
+  tab_caption("All observations by protocol and service")
+
+network.org.int %>%
+  tab_cells(service) %>%
+  tab_cols(protocol_type) %>%
+  tab_stat_cases() %>%
+  tab_pivot() %>%
+  tab_caption("Intrusion count by protocol and service")
+```
+
+```{r}
+base +
+  geom_bar(aes(x = service, fill = protocol_type)) + 
+  labs(title = "All observations by service and protocol") +
+  theme(axis.text.x = element_text(angle = 90))
+
+base +
+  geom_bar(aes(x = service, fill = is_intrusion)) +
+  facet_wrap(~protocol_type, nrow = 1) +
+  coord_flip() + 
+  labs(title = "Facets represent protocol types")
+```
+
+- Very few observations are `protocol_type` **icmp** and no intrusions occur via this protocol.
+
+- Most observations are `protocol_type` **tcp**, `service` **http**. Most intrusions come in this group, as well as `protocol_type` **udp**, `service` **private**.
+
+```{r}
+network.org.int %>%
+  tab_cells(service) %>%
+  tab_cols(protocol_type) %>%
+  tab_stat_tpct() %>%
+  tab_pivot() %>%
+  tab_caption("Share of known intrusions by protocol and service")
+```
+
+- 67% of known intrusions in the dataset are `service` **ftp**, **ftp_data** and **http**.
+
+**Observations by flag and service**
+```{r}
+network.org.2 %>%
+  tab_cells(service) %>%
+  tab_cols(flag) %>%
+  tab_stat_cases() %>%
+  tab_pivot() %>%
+  tab_caption("All observations by flag and service")
+
+network.org.int %>%
+  tab_cells(service) %>%
+  tab_cols(flag) %>%
+  tab_stat_cases() %>%
+  tab_pivot() %>%
+  tab_caption("Intrusion count by flag and service")
+```
+
+- ALL `service` **http** intrusions receive `flag` **RSTR**, **S0**, and **S3**. This is interesting because `service` **http**, `flag` **SF** represent the majority of all observations. This is a clear interaction of terms that models will need to identify.
+
+```{r}
+base +
+  geom_bar(aes(x = flag, fill = is_intrusion), position = "dodge") +
+  labs(title = "Only flag `SF` includes intrusions and benign activity")
+
+base.int +
+  geom_bar(aes(x = flag, fill = service)) +
+  labs(title = "Known intrusions by flag, service")
+```
+
+**Mean duration**
+```{r}
+duration.tbl <- network.org.int %>%
+  group_by(protocol_type, service) %>%
+  summarise(mean_duration_of_intrusions = round(mean(duration),0))
+duration.tbl
+```
+
+```{r}
+base + 
+  geom_boxplot(aes(x = service, y = duration, fill= service)) +
+  theme(axis.text.x = element_text(angle = 90))
+
+base.int + 
+  geom_boxplot(aes(x = service, y = duration, fill= service))
+```
+
+- Only `service` **other** has high variance in duration, but there are no intrusions in this service.
+
+- `service` **http** has several outliers, presumably intrusions.
+
+```{r}
+network[network$service==8,] %>%
+  tab_cells(duration) %>%
+  tab_cols(is_intrusion) %>%
+  tab_stat_mean() %>%
+  tab_pivot() %>%
+  tab_caption("Service 'http' mean duration by 'is_intrusion'")
+```
+
+- The table above suggests the outliers in `service` **http** are likely intrusions!. This is another useful interaction. 
+
+**Source and destination bytes.**
+
+**Source Bytes**
+```{r}
+# Make NA values '-' for cleaner tables with kable()
+options(knitr.kable.NA = '________')
+
+tbl.src.service <- network.org.2 %>%
+  group_by(service, flag) %>%
+  summarise(mean.src.bytes = round(mean(src_bytes),0))
+
+src.spread <- spread(tbl.src.service, flag, mean.src.bytes)
+kable(src.spread, format = "markdown", caption = "Mean source bytes")
+
+tbl.src.service.int <- network.org.int %>%
+  group_by(service, flag) %>%
+  summarise(mean.src.bytes = round(mean(src_bytes),0))
+
+src.int.spread <- spread(tbl.src.service.int, flag, mean.src.bytes)
+kable(src.int.spread, format = "markdown", caption = "Mean source bytes")
+```
+
+```{r}
+base + 
+  geom_histogram(aes(x = src_bytes, fill = is_intrusion)) +
+  labs(title = "All observation by source bytes, service")
+
+base.int + 
+  geom_histogram(aes(x = src_bytes, fill = service)) +
+  labs(title = "Known intrusions by source bytes, service")
+```
+
+**Destination bytes**
+```{r}
+tbl.dst <- network.org.2 %>%
+  group_by(service, flag) %>%
+  summarise(mean.dst.bytes = round(mean(dst_bytes),0))
+
+dst.spread <- spread(tbl.dst, flag, mean.dst.bytes)
+kable(dst.spread, format = "markdown", caption = "Mean destination bytes")
+
+tbl.dst.int <- network.org.int %>%
+  group_by(service, flag) %>%
+  summarise(mean.dst.bytes = round(mean(dst_bytes),0))
+
+dst.int.spread <- spread(tbl.dst.int, flag, mean.dst.bytes)
+kable(dst.int.spread, format = "markdown", caption = "Mean destination bytes")
+```
+
+-`service` http intrusions clearly differ in that they have 0 destination bytes.
+
+```{r}
+base + 
+  geom_histogram(aes(x = dst_bytes, fill = is_intrusion)) +
+  labs(title = "All observations by destination bytes, service")
+
+base.int + 
+  geom_histogram(aes(x = dst_bytes, fill = service)) +
+  labs(title = "Known intrusions by destination bytes, service")
+```
+
+**Association and correlation**
+```{r, fig.height = 4, fig.width = 8}
+# Association matrix for factor variables
+# For explanation, see: https://cran.r-project.org/web/packages/GoodmanKruskal/vignettes/GoodmanKruskal.html
+# If required: install.packages("GoodmanKruskal")
+
+var.factors <- c('protocol_type','service','flag','logged_in','root_shell','is_guest_login','is_intrusion')
+cor.frame <- subset(network, select = var.factors)
+gk.matrix <- GKtauDataframe(cor.frame)
+plot(gk.matrix)
+
+# Correlation matrix, all predictors required to be numeric
+# If required: install.packages("corrplot")
+cor.frame.2 <- select(network, -var.factors)
+cor.matrix <- cor(cor.frame.2)
+cor.tbl <- kable(cor.matrix, format = "markdown", digits = 4)
+corrplot(cor.matrix)
+#cor.tbl
+```
+
+- From above, the standard correlation matrix suggests there are no significantly correlated continuous predictors (i.e., nothing duplicative about these).
+
+- Importantly, the GK association matrix shows that `service` perfectly predicts `protocol_type` and `is_guest_login`. Also, both `service` and `flag` have relatively stronger forward associations with `is_intrusion`.
+
+### Multiple Factor Analysis
+
+> The multifactor analysis below is conducted on a dataframe including our known intrusions. The tables and charts pick up on the interactions that were becoming clear in the basic EDA. That is, the MFA analysis shows in greater detail that there appear to be repeated and identifiable attack vectors among our intrusions that can be identified on the basis of certain factors (e.g., service and flag) and continuous variables (e.g., bytes and duration). 
+
+> Such identifiable attacks can be captured quickly in an Intrusion Detection System that has some element of supervised learning. 
+
+**MFA**
+```{r}
+#MFA analysis using FactoMineR library - More information about Multiple Factor Analysis can be found on - https://www.rdocumentation.org/packages/FactoMineR/versions/2.2/topics/MFA 
+
+newDF <- network.int[,c("duration","src_bytes","dst_bytes","protocol_type","service","flag","logged_in","is_guest_login")]
+res.MFA<-MFA(newDF,group=c(1,2,3,2), type=c("s","s","n","n"),ncp=2,name.group=c("duration","bytes","proto_info","login_info"),graph=FALSE)#creating MFA output
+summary(res.MFA)
+```
+
+- As we can see from the summary, flag_3, service_8,service_12,protocol_type_3 contribute most to the dimension 1 whereas service_6 contributes dominantly to dimension 2. 
+- Individuals with these parameters also are represented across these dimensions. 
+
+**Individual Factor Analysis Plot**
+```{r}
+fviz_mfa_ind(res.MFA, col.ind = "cos2",
+  gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+  repel = TRUE )
+```
+- From the plot above we can observe that there are mainly 3 clusters that can be observed.
+- The ones in the lower left quadrant form one cluster of different intrusions since they are highly correlated to each other and do not contribute much to both dimension 1 and 2. The one  in the lower right quadrant forms our second cluster - contribute mainlt to the dimension 1 and the one on the top forms third cluster of intrusions that contribute to the dimension 2. 
+
+# Section 2: Classification Models {.tabset}
+
+## Logistic Model
+
+> Logistic Model are simple classification models which can be efficiently used for this dataset which is linearly separable
+
+>Logistic regression is easier to implement, interpret and very efficient to train
+
+>We start by building the model on training data which is validated by 10 fold Cross Validation and check how well it is classifying the training as well as test data. 
+
+**Building the logistic model**
+```{r}
+logistic.ctrl <- trainControl(method= "cv", number=10) #creating k fold control
+logistic.fit<- train(is_intrusion ~. ,data=network.train,trControl= logistic.ctrl, family= binomial(link="logit")) #training the model
+
+```
+
+**Predictions and Confusion Matrix using Logistic Regression Model**
+```{r}
+pred.logistic.train<- predict(logistic.fit, network.train) #predicting class for training data
+logistic.train.cm <- confusionMatrix(pred.logistic.train, network.train$is_intrusion)# confusion matrix with training predictions
+pred.logistic.test <- predict(logistic.fit , network.test)#predicting class for test data
+logistic.test.cm <- confusionMatrix(pred.logistic.test, network.test$is_intrusion)# confusion matrix with test predictions
+```
+
+**Plot the logistic model**
+```{r}
+par(mfrow=c(1,2))
+logit_hist_train <- ggplot(data= network.train , aes(x= pred.logistic.train, fill= is_intrusion))
+#plot the results for predictions on training data
+logit_hist_train + geom_histogram(stat="count") + 
+  labs(x = "Intrusion", y = "Count", title =  "Logistic Predictions for Training Data") 
+logit_hist_test <- ggplot(data= network.test , aes(x= pred.logistic.test, fill= is_intrusion))
+#plot the results for predictions on test data
+logit_hist_test + geom_histogram(stat="count") +
+  labs(x = "Intrusion", y = "Count", title =  "Logistic Predictions for Test Data") 
+```
+
+> Logistic Regression model does a good classification job with decently high accuracy rate.
+
+## KNN
+
+>K-nearest neighbors (KNN) is a non-parametric method.The new observations are classified to a class belonging to the majority of its neighbors.The number of neighbors can be pre-determined.
+
+>Below, we will fit a KNN model after scaling the data and run a 10-fold classification. Then we plot a graph to find the level of accuracy vs the k value to find which value may be best suited for the highest accruacy level. In our model, accuracy matters, so does high value of sentivity and it is expensive to not be able to detect intrusions. So the higher the accuracy of that is achieved by the k value, the better it will work for our system.
+
+**Building the KNN Model**
+```{r}
+knn.ctrl <- trainControl(method = "cv", number = 10) #Creating 10-fold control 
+
+fit.knn <- train(is_intrusion~., data = network.train, method = 'knn', trControl = knn.ctrl, preProcess = c("center","scale"), tuneLength = 10) #training model
+
+plot(fit.knn) #accuracy Vs Neighbors plot for KNN
+
+fit.knn #summary of the KNN model
+```
+
+**Predictions and Confusion Matrix using KNN Model**
+```{r}
+pred.knn.train <- predict(fit.knn, newdata = network.train) #Predicting class for training data
+knn.train.cm <- confusionMatrix(pred.knn.train, network.train$is_intrusion) #Confusion Matrix of training data predictions
+ggplot(data = network.train, aes(x = pred.knn.train, fill = is_intrusion)) +geom_histogram(stat = "count") + labs(x = "Model Prediction", title = "KNN model prediction on train data")
+```
+
+> For the train data, we have an accuracy of 97.46%, Sensitivity/True Positive Rate of 97.36%, and the False Positive Rate = 1.67%
+
+```{r}
+pred.knn.test <- predict(fit.knn, newdata = network.test) #Predicting class for test data
+knn.test.cm <- confusionMatrix(pred.knn.test, network.test$is_intrusion) #Confusion Matrix of test data predictions
+ggplot(data = network.test, aes(x = pred.knn.test, fill = is_intrusion)) +geom_histogram(stat = "count") + labs(x = "Model Prediction", title = "KNN model prediction on test data")
+```
+
+> For the test data, we have an accuracy of 96%, Sensitivity/ True Positive Rate of 96.29%, and the False Positive Rate = 3.3%%
+
+> Overall, the KNN model does a good classification job with decently high accuracy rate.
+
+## Random Forest
+
+> Random forests are bagged decision tree models that split on a subset of features on each split. It can handle binary features, categorical features, and numerical features.
+
+> The random forest starts with a standard machine learning technique called a “decision tree”. In a decision tree, an input is entered at the top and as it traverses down the tree the data gets bucketed into smaller and smaller sets. 
+
+**We ﬁrst use classiﬁcation trees to analyze the `network` data set. Using the `tree` command to fit a decision tree to every other variable in the `network` data.  Run `summary` on tree object.**
+
+```{r, fig.width = 14, fig.height = 10}
+tree.network <- tree(is_intrusion~. ,network)
+summary(tree.network)
+```
+-The `summary()` function lists the variables that are used as internal nodes in the tree, the number of terminal nodes, and the (training) error rate. The number of terminal nodes are 7 in this case. We see that the training error rate is 3.4%
+
+
+**One of the most attractive properties of trees is that they can be graphically displayed. We use the `plot()` function to display the tree structure, and the `text()` function to display the node labels.**
+
+```{r, fig.width = 14, fig.height = 10}
+plot(tree.network)
+text(tree.network ,pretty =0)
+```
+
+-The most important indicators of `is_intrusion` appear to be flag and service.
+
+```{r}
+# This tells us: # misclass, # total
+summary(tree.network)$misclass
+
+misclass.rate <- summary(tree.network)$misclass[1] / summary(tree.network)$misclass[2]
+misclass.rate
+```
+
+**The output below shows which variables get used, and which ones do not get used.  We see that not all variables are used.**
+```{r}
+summary(tree.network)$used
+names(network)[which(!(names(network) %in%summary(tree.network)$used))]
+```
+
+-In order to properly evaluate the performance of a classiﬁcation tree on these data, we must estimate the test error rather than simply computing the training error.
+
+**The `predict()` function can be used for this purpose.**
+
+```{r}
+intrusion_test=network.test$is_intrusion
+tree.network.train <- tree(is_intrusion~.,network.train)
+tree.pred <- predict(tree.network.train,network.test,type="class")
+confmat_tree <- confusionMatrix(table(tree.pred,intrusion_test), positive = "1")
+confmat_tree
+```
+
+-This approach leads to correct predictions for around `r round(confmat_tree[["overall"]]["Accuracy"],3)` of the network intrusions in the test data set.
+
+```{r, fig.width = 14, fig.height = 10}
+plot(tree.network.train)
+text(tree.network.train ,pretty =0)
+```
+
+-Service, flag, duration, src_bytes and dst_bytes are used for this decision tree on training data set.
+
+**Next, we consider whether pruning the tree might lead to improved results.**
+
+**The function `cv.tree()` performs cross-validation in order to determine the optimal level of tree complexity. Cost complexity pruning is used in order to select a sequence of trees for consideration.**
+
+```{r}
+cv.network <- cv.tree(tree.network, FUN=prune.misclass)
+names(cv.network)
+cv.network
+```
+
+- The cv.tree() function reports the number of terminal nodes of each tree considered (size) as well as the corresponding error rate and the value of the cost-complexity parameter used (k).
+
+- The tree with `r cv.network$size[2]` terminal nodes results in the lowest cross-validation error rate, with `r cv.network$dev[2]` cross-validation errors. 
+
+**We plot the error rate as a function of both size and k.**
+
+**The following code produces CV error plots indexed by tree size and k (essentially what we called alpha in class).**
+
+```{r}
+par(mfrow = c(1,2))
+plot(cv.network$size, cv.network$dev, type="b")
+plot(cv.network$k, cv.network$dev, type="b")
+```
+
+**We now apply the `prune.misclass()` function in order to prune the tree to obtain the six-node tree that has the lowest CV error. **
+
+```{r, fig.width = 14, fig.height = 10}
+par(mfrow = c(1,1))
+prune.network <- prune.misclass(tree.network, best = 6)
+#Plot this tree, and overlay text.
+plot(prune.network)
+text(prune.network, pretty=0)
+
+# Variables used
+summary(prune.network)$used
+```
+
+Once again, we apply the `predict()` function to guage how well does this pruned tree perform on the test data set.
+
+```{r}
+tree.predict <- predict(prune.network, network.test, type="class")
+confmat.prunpred <- confusionMatrix(table(tree.predict, intrusion_test),positive = "1")
+confmat.prunpred
+
+# Misclassification rate
+1 - (sum(diag(table(tree.predict, intrusion_test))) / sum(table(tree.predict, intrusion_test)))
+```
+
+- Pruned tree did not improve the classiﬁcation accuracy.
+
+**We'll need to construct `rpart` objects instead of `tree` objects in order to use the more advanced plotting routine from the `partykit` library. **
+
+Fitting a decision tree to the data using the `rpart()` function.  The syntax is exactly the same as for the `tree` function.  Using the `plot` and `text` functions to visualize the tree.  
+
+```{r, fig.height = 7}
+network.tree <- rpart(is_intrusion ~ .,network.train , method="class")
+
+plot(network.tree)
+text(network.tree, pretty=0)
+
+```
+
+- Flag, services, duration, src_bytes and dst_bytes are used in this tree. Same as it was as for the `tree` function.
+
+```{r}
+tree_pred <- predict(network.tree,network.test,type="class")
+confmat_rpart<- confusionMatrix(table(tree_pred,intrusion_test), positive = "1")
+confmat_rpart
+```
+- This approach leads to correct predictions for around `r round(confmat_rpart[["overall"]]["Accuracy"],3)` of the network intrusions in the test data set. It is very similar to `tree()` function performed above. However, this decision tree offers a better sensitivity than `tree()` function.
+
+**The `as.party` command converts the `rpart` tree to a `party` object that has a much better plot function.  Runing `plot` on the object created below.**
+
+```{r, fig.height = 7, fig.width = 14}
+network.party <- as.party(network.tree)
+plot(network.party)
+```
+
+- For instance, Node 17 has 78 observations. The shaded region denotes the proportion of observations with `is_intrusion`. Since the proportion of `is_intrusion` is more than 0.5, the observations falling into this node gets classified as intrusions.
+
+**Now we'll try growing a more complex tree, and pruning them back.  The code below grows a tree to a complexity parameter value of `cp = 0.002`, while ensuring that the minimum number of observations that must exist in a node in order for a split to be attempted is `minsplit = 20` observations. **
+
+Running the `plotcp` command on this tree to get a plot of the Cross-validated error.  Also look at the `cptable` attribute of this tree.  Observe that all of the errors are reported relative to that of the 1-node "tree". 
+
+```{r, fig.height = 7}
+network.full <- rpart(is_intrusion ~ ., data = network.train, 
+                        control=rpart.control(minsplit=20, cp=0.002))
+
+plot(network.full)
+text(network.full, pretty=0)
+
+plotcp(network.full)
+network.full$cptable
+
+```
+The horizontal dotted line is 1 standard error above the minimum CV value for the range of `cp` values shown.  
+
+```{r, fig.height = 7, fig.width = 14}
+network.fullparty <- as.party(network.full)
+plot(network.fullparty)
+```
+
+**Appling the 1-SE rule to determine which value of `cp` to use for pruning.**
+```{r}
+ind <- which.min(network.full$cptable[,"xerror"])
+opt <- network.full$cptable[ind,"xerror"] + network.full$cptable[ind,"xstd"]
+cp.pruned <- subset(network.full$cptable,network.full$cptable[,"xerror"]<opt)[1,"CP"]
+```
+
+```{r, fig.height = 7, fig.width = 14}
+network.pruned <- prune(network.full, cp = cp.pruned)
+plot(network.pruned)
+text(network.pruned)
+
+network.prunedparty <- as.party(network.pruned)
+plot(network.prunedparty)
+
+ypred = predict(network.pruned,network.test,type="class")
+confmat_prunedpart <- confusionMatrix(table(ypred,intrusion_test), positive = "1")
+confmat_prunedpart
+```
+
+- Pruned version did not improve the classiﬁcation accuracy, similar to what we saw in `tree()` function above.
+
+**let's try fitting an actual random forest.  The default setting is to take `mtry = sqrt(p)` for classification. Fitting a random forest to the training data using `mtry = 5`. **   
+
+```{r}
+rf.network <- randomForest(is_intrusion~., data=network.train, mtry=5, importance=TRUE)
+
+rf.network
+
+plot(rf.network)
+```
+
+**Predictions and Confusion Matrix using Random Forest Model**
+```{r}
+pred.rf.train <- predict(rf.network, newdata = network.train,type = "class") #Predicting class for training data
+rf.train.cm <- confusionMatrix(table(pred.rf.train, network.train$is_intrusion), positive = "1") #Confusion Matrix of training data predictions
+ggplot(data = network.train, aes(x = pred.rf.train, fill = is_intrusion)) +geom_histogram(stat = "count") + labs(x = "Model Prediction", title = "Random Forest model prediction on train data")
+```
+
+```{r}
+pred.rf.test <- predict(rf.network, newdata = network.test,type = "class") #Predicting class for test data
+rf.test.cm <- confusionMatrix(table(pred.rf.test, network.test$is_intrusion), positive = "1") 
+rf.test.cm #Confusion Matrix of test data predictions
+ggplot(data = network.test, aes(x = pred.rf.test, fill = is_intrusion)) +geom_histogram(stat = "count") + labs(x = "Model Prediction", title = "Random Forest model prediction on test data")
+```
+
+- Random Forrest model does not improve the accuracy percentage in comparison with the single classification tree. That is because aggregated/ensemble models are only better than their "single" counterparts if the single model suffers from instability.
+
+- With 3000 training rows and only few important feature, even a single decision tree may get reasonably stable
+
+- If the predictions of the trees are stable, all submodels in the ensemble return the same prediction and then the prediction of the random forest is just the same as the prediction of each single tree. Not only the overall performance would be similar, the same cases would also be predicted similarly. 
+
+**Two measures of variable importance are reported**
+```{r, fig.height = 7}
+importance(rf.network)
+varImpPlot(rf.network)
+```
+
+-The former is based upon the mean decrease of accuracy in predictions on the out of bag samples when a given variable is excluded from the model. The latter is a measure of the total decrease in node impurity that results from splits over that variable, averaged over all trees.
+
+-The results indicate that across all of the trees considered in the random forest, flag, service, duration, src_bytes and dst-bytes are the most important variables.
+
+## Gradient Boosting Machine
+
+>GBMs build an ensemble of shallow and weak successive trees with each tree learning and improving on the previous. When combined, these many weak successive trees produce a powerful “committee” for prediction and classification.
+
+>GBMs are popular given they are often difficult to beat on accuracy. Further, they are highly flexible (several parameters can be tuned) and do not require data pre-processing to create powerful classification models. 
+
+>Since tuning many parameters can be computationally expensive, this model has been implemented with stochastic (random) grid search. This reduces training time and usually has little impact on accuracy.
+
+>For analysis of the strength of GBM models in network anomaly detection, see "An in-depth experimental study of anomaly detection using gradient boosted machine." (Tama and Rhee, 2017)
+
+>For details on documentation and guides used to enable this analysis, see:
+
+- http://docs.h2o.ai/h2o/latest-stable/h2o-docs/data-science/gbm.html
+
+- https://github.com/h2oai/h2o-3/blob/master/h2o-docs/src/product/tutorials/gbm/gbmTuning.Rmd
+
+- http://uc-r.github.io/gbm_regression
+
+```{r}
+## The GBM will be performed using the h2o package
+## This package requires data an h2o object (h2o frame, not a data frame)
+
+# Split above training set once more to include small validation set for h2o gbm fitting (using cv in tuning is comp. expensive in h2o)
+set.seed(45)
+valid.index <- createDataPartition(network.train$is_intrusion, p = .75, 
+                                  list = FALSE, 
+                                  times = 1)
+valid.train <- network.train[valid.index,]
+valid.test <- network.train[-valid.index,]
+
+# Convert data sets to H2O objects 
+network.h2o <- as.h2o(network)
+h2o.train <- as.h2o(network.train)
+h2o.test <- as.h2o(network.test)
+train <- as.h2o(valid.train)
+valid <- as.h2o(valid.test)
+
+
+# Response for the supervised problem
+response <- "is_intrusion"
+
+# Use all other columns (except for the name) as predictors
+predictors <- setdiff(names(network.h2o), c(response, "name"))
+
+# Split above training set once more to include small validation set for h2o gbm fitting purposes (cv within tuning search computationally expensive)
+split <- h2o.splitFrame(h2o.train, ratios = 0.75)
+train <- split[[1]]
+valid <- split[[2]]
+```
+
+**Establish baseline performance including 5-fold cv**
+
+```{r}
+# Baseline model
+gbm.base <- h2o.gbm(x = predictors, y = response, training_frame = h2o.train, nfolds = 5)
+
+# Get summary
+gbm.base
+```
+
+**Model tuning**
+
+- Implement random search over large grid to find near-optimal results
+
+```{r}
+# Search criteria with stopping metrics:
+# stops the grid search if none of the last 10 models have managed to have a 0.5% improvement in chosen metric
+# compared to the best model before that. If we continue to find improvements then I cut the grid search off 
+# after 3600 seconds (60 minutes). 
+
+search_criteria <- list(
+  strategy = "RandomDiscrete",
+  stopping_metric = "AUC",
+  stopping_tolerance = 0.005,
+  stopping_rounds = 10,
+  max_runtime_secs = 60*60,
+  max_models = 100                  
+  )
+
+# Fuller hyperparameter search 
+hyper_params = list( 
+  ## depth 10+ usually not necessary and risks overfit
+  max_depth = seq(1,9,1),
+  
+  ## search a large space of row sampling rates per tree
+  sample_rate = seq(0.2,1,0.01),
+ 
+  ## search a large space of column sampling rates per split
+  col_sample_rate = seq(0.2,1,0.01),                                         
+  
+  ## search a large space of column sampling rates per tree
+  col_sample_rate_per_tree = seq(0.2,1,0.01),                                
+  
+  ## search a large space of the number of min rows in a terminal node
+  min_rows = 2^seq(0,log2(nrow(train))-1,1),                                 
+  
+  ## try all histogram types (QuantilesGlobal and RoundRobin are good for numeric columns with outliers)
+  histogram_type = c("UniformAdaptive","QuantilesGlobal","RoundRobin")       
+)
+
+# After setting above, get grid
+grid <- h2o.grid(
+  ## hyper parameters
+  hyper_params = hyper_params,
+  
+  ## hyper-parameter search configuration (see above)
+  search_criteria = search_criteria,
+  
+  ## which algorithm to run
+  algorithm = "gbm",
+  
+  ## identifier for the grid, to later retrieve it
+  grid_id = "final_grid", 
+  
+  ## standard model parameters
+  x = predictors, 
+  y = response, 
+  training_frame = train,
+  validation_frame = valid,
+  
+  ## more trees is better if the learning rate is small enough
+  ## use "more than enough" trees - we have early stopping
+  ntrees = 10000,
+  
+  ## smaller learning rate is better
+  ## since we have learning_rate_annealing, we can afford to start with a bigger learning rate
+  learn_rate = 0.05,                                                         
+  
+  ## learning rate annealing: learning_rate shrinks by 1% after every tree 
+  ## (use 1.00 to disable, but then lower the learning_rate)
+  learn_rate_annealing = 0.99, 
+  
+  ## early stopping based on timeout (no model should take more than 1 hour - modify as needed)
+  max_runtime_secs = 3600,                                                 
+  
+  ## early stopping once the validation AUC doesn't improve by at least 0.01% for 5 consecutive scoring events
+  stopping_rounds = 5, stopping_tolerance = 1e-4, stopping_metric = "AUC", 
+  
+  ## score every 10 trees to make early stopping reproducible (it depends on the scoring interval)
+  score_tree_interval = 10,                                                
+  
+  ## base random number generator seed for each model (automatically gets incremented internally for each model)
+  seed = 123                                                             
+)
+
+## Sort the grid models by AUC
+sorted.grid <- h2o.getGrid("final_grid", sort_by = "auc", decreasing = TRUE)    
+sorted.grid
+```
+
+**Model Inspection and Final Test Set Scoring**
+
+- After search, conduct 5-fold CV on the top 5 models and select on the basis of mean cross-validated AUC
+
+```{r message=FALSE, warning=FALSE}
+cv.auc <- numeric(5)
+for (i in 1:5) {
+  gbm.5 <- h2o.getModel(sorted.grid@model_ids[[i]])
+  cvgbm <- do.call(h2o.gbm,
+        ## update parameters in place
+        {
+          p <- gbm.5@parameters
+          p$model_id = NULL          ## do not overwrite the original grid model
+          p$training_frame = h2o.train      ## use the full training dataset
+          p$validation_frame = NULL  ## no validation frame
+          p$nfolds = 5               ## cross-validation
+          p
+        }
+  )
+  print(gbm.5@model_id)
+  print(cvgbm@model$cross_validation_metrics_summary[2,]) ## Pick out the "AUC" row
+  cv.auc[i] <- cvgbm@model$cross_validation_metrics_summary[2,1]
+}
+cv.auc
+```
+
+- We can take the best model (top of the above list) and check its performance on the test set.
+
+```{r message=FALSE, warning=FALSE}
+gbm <- h2o.getModel(sorted.grid@model_ids[[which.max(cv.auc)]])
+gbm.perf.train <- h2o.performance(gbm) # Training set performance
+gbm.perf <- h2o.performance(gbm, newdata = h2o.test) # Test set performance
+gbm.perf # Display test performance
+```
+
+> We can then inspect the winning model's parameters:
+
+```{r message=FALSE, warning=FALSE}
+gbm@parameters
+```
+
+> This will test best model on full training data set with 5-fold CV:
+
+```{r message=FALSE, warning=FALSE}
+gbm.model <- do.call(h2o.gbm,
+        ## update parameters in place
+        {
+          p <- gbm@parameters
+          p$model_id = NULL          ## do not overwrite the original grid model
+          p$training_frame = h2o.train      ## use the full training dataset
+          p$validation_frame = NULL  ## no validation frame
+          p$nfolds = 5               ## cross-validation
+          p
+        }
+)
+gbm.model@model$cross_validation_metrics_summary
+```
+
+> Keeping the same "best" model, we can make test set predictions as follows:
+
+```{r message=FALSE, warning=FALSE}
+gbm.preds <- h2o.predict(gbm, h2o.test)
+head(gbm.preds)
+gbm@model$validation_metrics@metrics$max_criteria_and_metric_scores
+```
+
+**Variable importance for GBM**
+
+```{r}
+h2o.varimp_plot(gbm, num_of_features = 10)
+```
+
+> Roc curve
+
+```{r}
+plot(gbm.perf, type="roc")
+```
+
+> Partial Dependence
+
+```{r}
+h2o.partialPlot(object = gbm, data = network.h2o, cols = c("flag","service", "src_bytes", "dst_bytes", "duration"))
+```
+
+> In case we want to use caret package to compare results across models, I transformed data from h2o objects back to R data frames and saved metrics.
+
+```{r}
+# Build "test.set" for metric creation with caret package
+pred.frame <- as.data.frame(gbm.preds)
+test.frame <- as.data.frame(h2o.test)
+test.set <- cbind(pred.frame, obs = test.frame$is_intrusion)
+colnames(test.set)[1:3] <- c("pred", "0", "1")
+
+# Confusion matrix full stats
+gbm.conf.mat <- confusionMatrix(test.set$pred, test.set$obs, positive = "1")
+gbm.sens <- gbm.conf.mat$byClass[1]
+gbm.spec <- gbm.conf.mat$byClass[2]
+
+# For precision/recall stats
+gbm.prec.rec <- confusionMatrix(test.set$pred, test.set$obs, positive = "1", mode = "prec_recall")
+
+```
+
+
+# Section 3: Comparison of the Classification Models {.tabset}
+
+## Evaluation of Classification Models on training dataset**
+```{r}
+
+## Logistic
+Logistic.train <- c("Logistic",as.numeric(round(logistic.train.cm$byClass[1],2)), as.numeric(round(1-logistic.train.cm$byClass[2],2)) )
+
+## KNN
+KNN.train <- c("KNN", as.numeric(round(knn.train.cm$byClass[1],2)), as.numeric(round(1-knn.train.cm$byClass[2],2)))
+
+## Random Forest
+RF.train <- c("Random Forest", as.numeric(round(rf.train.cm$byClass[1],2)), as.numeric(round(1-rf.train.cm$byClass[2],2)))
+
+
+## Gradient boosting machine
+gbm.train.auc <- gbm.perf.train@metrics$AUC
+gbm.train.sens <- as.numeric(gbm.model@model$cross_validation_metrics_summary["recall",1])
+gbm.train.spec <- as.numeric(gbm.model@model$cross_validation_metrics_summary["specificity",1])
+
+
+
+compare.table.train <- data.frame("Model"= c("Logistic","KNN", "GBM", "RF"),"True_Positive_Rate"= c(as.numeric(round(logistic.train.cm$byClass[1],4)),as.numeric(round(knn.train.cm$byClass[1],4)),round(gbm.train.sens, 4), as.numeric(round(rf.train.cm$byClass[1],4))), "False_Positive_Rate"=c(as.numeric(round(1-logistic.train.cm$byClass[2],4)),as.numeric(round(1-knn.train.cm$byClass[2],4)),round(1-gbm.train.spec,4), as.numeric(round(1-rf.train.cm$byClass[2],4))))
+
+kable(compare.table.train)
+```
+
+## Evaluation of Classification Models on test dataset**
+```{r}
+## Insert other models below
+
+##Logistic
+Logistic.test <- c("Logistic",as.numeric(round(logistic.test.cm$byClass[1],2)), as.numeric(round(1-logistic.test.cm$byClass[2],2)) )
+
+## KNN
+KNN.test <- c("KNN", as.numeric(round(knn.test.cm$byClass[1],2)), as.numeric(round(1-knn.test.cm$byClass[2],2)))
+
+##Random Forest
+RF.test <- c("Random Forest", as.numeric(round(rf.test.cm$byClass[1],2)), as.numeric(round(1-rf.test.cm$byClass[2],2)))
+
+
+## Gradient boosting machine
+# gbm.perf # Full performance summary of model on test set
+# gbm.conf.mat # Caret package summary of confusion matrix stats
+# gbm.sens # Sensivity
+# gbm.spec # Specificity
+
+compare.table.test <- data.frame("Model"= c("Logistic","KNN", "GBM", "RF"),"True_Positive_Rate"= c(as.numeric(round(logistic.test.cm$byClass[1],4)),as.numeric(round(knn.test.cm$byClass[1],4)),gbm.sens, as.numeric(round(rf.test.cm$byClass[1],4))), "False_Positive_Rate"=c(as.numeric(round(1-logistic.test.cm$byClass[2],4)),as.numeric(round(1-knn.test.cm$byClass[2],4)),1-gbm.spec, as.numeric(round(1-rf.test.cm$byClass[2],4))))
+```
+
+## Comparison table
+```{r}
+kable(compare.table.test, digits = 4, caption = "Test set comparison on Sensitivity and Specificity (ROC curve measures)")
+```
+
+## ROC and AUC plots
+```{r}
+## pRoc library allows plotting ROC curves
+## KNN roc, ready to plot
+knn.pred.prob <-predict(fit.knn, newdata = network.test, type = "prob") #Predicting class for test data
+knn.roc <- roc(network.test$is_intrusion, knn.pred.prob[,"0"]) #roc curve for the model
+
+plot.roc(knn.roc, col="red",print.auc=TRUE, print.auc.y=0.4,legacy.axes=TRUE, legend=TRUE)
+
+##Logistic ROC
+logistic.pred.prob <- predict(logistic.fit, network.test, type= "prob")
+logistic.roc <- roc(network.test$is_intrusion, logistic.pred.prob[,"1"])
+plot.roc(logistic.roc, add=TRUE, col="green",print.auc=TRUE, print.auc.y=0.3,legacy.axes=TRUE, legend=TRUE)
+
+##Random Forest
+ypred.rfroc = predict(rf.network,newdata=network.test, type = "Prob")
+rf.roc <- roc(intrusion_test, ypred.rfroc[,"1"])
+plot.roc(rf.roc,print.auc = TRUE, print.auc.y=0.5, legacy.axis=TRUE,legend=TRUE, add=TRUE, col="Purple")
+
+# gbm roc object prepared above, ready to plot
+gbm.roc <- roc( response = test.set$obs , predictor = test.set$`1` )
+gbm.auc <- auc(gbm.roc)
+plot.roc(gbm.roc, add=TRUE, col="blue",print.auc=TRUE, print.auc.y=0.2,legacy.axes=TRUE, legend=TRUE)
+```
+
+- The color scheme is as follows:
+- RF = PURPLE
+- KNN = RED
+- Logistic = GREEN
+- GBM = BLUE
+
+# Section 4: Findings 
+
+**Summary and Conclusion**
+
+> We find that several models perform well. The KNN, Logistic and GBM models each have similar performance on the test set. Further, the AUC measures are all only marginally different.
+
+> We believe the logistic model and GBM have the most promise. RF performed worse on Sensitivity. Such false negatives can be especially costly in this setting, and so this model should not be used. KNN, meanwhile, is computationally expensive. Since it is not a parametric model, it must search through the dataset each time it classifies a point. This can take a long time with a large dataset, which is detrimental for the purposes of real-time execution.
+
+> The logistic model's strength is in its simplicity and interpretability. If the bank is concerned with identifying KNOWN attack vectors, the logistic model can provide a straightforward way to update and maintain a model that readily identifies known attacks.
+
+> The GBM is less interpretable. It provides added depth, however, including model tuning and maximized metric options. This model may be better suited to identifying anomalous activity (unknown attack vectors). This may favor the GBM overall if one model must be used. There is a possibility more than one model can be useful when it comes to both logging historic data with **known** attacks and evaluating new requests in real time for anomalies. Th best systems will be able to identify known attacks with extremely high precision and do so very quickly, but also give probabilistic predictions for anomalous activity that a human analyst can furhter assess.  
